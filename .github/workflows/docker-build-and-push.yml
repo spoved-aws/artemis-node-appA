@@ -42,5 +42,5 @@ jobs:
           push: true
           no-cache: true 
           tags: |
-            kanukhosla10/artemis-node-appA:latest
-            kanukhosla10/artemis-node-appA:sha-${{ env.sha_short  }}
+            kanukhosla10/artemis-node-app-a:latest
+            kanukhosla10/artemis-node-app-a:sha-${{ env.sha_short  }}
