@@ -1,172 +1,132 @@
 require('dotenv').config();
-require('./tracing'); // keep if you already have OpenTelemetry setup
+require('./tracing');
 
 const express = require('express');
+const pino = require('pino');
 const axios = require('axios');
 const promClient = require('prom-client');
-const pino = require('pino');
 
 const app = express();
 const PORT = 3001;
 
-// ----------------------
-// Structured Logger (IMPORTANT)
-// ----------------------
+// -------------------- LOGGER --------------------
 const logger = pino({
-    level: 'info',
+  level: process.env.LOG_LEVEL || 'info',
+  base: {
+    service: 'nodejs-app-a'
+  }
 });
 
-// ----------------------
-// Prometheus Metrics
-// ----------------------
+// -------------------- PROMETHEUS --------------------
 const httpRequestCounter = new promClient.Counter({
-    name: 'http_requests_total',
-    help: 'Total number of HTTP requests',
-    labelNames: ['method', 'path', 'status_code'],
+  name: 'http_requests_total',
+  help: 'Total HTTP requests',
+  labelNames: ['method', 'path', 'status_code']
 });
 
 const requestDurationHistogram = new promClient.Histogram({
-    name: 'http_request_duration_seconds',
-    help: 'Duration of HTTP requests in seconds',
-    labelNames: ['method', 'path', 'status_code'],
-    buckets: [0.1, 0.5, 1, 2, 5, 10],
+  name: 'http_request_duration_seconds',
+  help: 'Request duration',
+  labelNames: ['method', 'path', 'status_code']
 });
 
-const requestDurationSummary = new promClient.Summary({
-    name: 'http_request_duration_summary_seconds',
-    help: 'Summary of HTTP request durations',
-    labelNames: ['method', 'path', 'status_code'],
-    percentiles: [0.5, 0.9, 0.99],
-});
-
-// Gauge example
-const gauge = new promClient.Gauge({
-    name: 'node_gauge_example',
-    help: 'Example gauge metric',
-    labelNames: ['method', 'status'],
-});
-
-// ----------------------
-// Helpers
-// ----------------------
-const simulateAsyncTask = async () => {
-    const randomTime = Math.random() * 2;
-    return new Promise((resolve) =>
-        setTimeout(resolve, randomTime * 1000)
-    );
-};
-
-app.use(express.json());
-
-// ----------------------
-// Observability Middleware
-// ----------------------
+// -------------------- MIDDLEWARE --------------------
 app.use((req, res, next) => {
-    const start = Date.now();
+  const start = Date.now();
 
-    res.on('finish', () => {
-        const duration = (Date.now() - start) / 1000;
+  res.on('finish', () => {
+    const duration = (Date.now() - start) / 1000;
 
-        httpRequestCounter.labels({
-            method: req.method,
-            path: req.path,
-            status_code: res.statusCode,
-        }).inc();
+    const logLevel =
+      res.statusCode >= 500 ? 'error' :
+      res.statusCode >= 400 ? 'warn' : 'info';
 
-        requestDurationHistogram.labels({
-            method: req.method,
-            path: req.path,
-            status_code: res.statusCode,
-        }).observe(duration);
-
-        requestDurationSummary.labels({
-            method: req.method,
-            path: req.path,
-            status_code: res.statusCode,
-        }).observe(duration);
-
-        logger.info({
-            method: req.method,
-            path: req.path,
-            status: res.statusCode,
-            duration,
-        }, 'http request completed');
+    logger[logLevel]({
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      duration,
+      msg: 'http request completed'
     });
 
-    next();
+    httpRequestCounter.inc({
+      method: req.method,
+      path: req.path,
+      status_code: res.statusCode
+    });
+
+    requestDurationHistogram.observe({
+      method: req.method,
+      path: req.path,
+      status_code: res.statusCode
+    }, duration);
+  });
+
+  next();
 });
 
-// ----------------------
-// Routes
-// ----------------------
+// -------------------- ROUTES --------------------
 app.get('/', (req, res) => {
-    logger.info('home endpoint hit');
-    res.status(200).json({ status: 'running 🚀' });
+  logger.info({ msg: 'home endpoint hit' });
+  res.json({ status: 'running' });
 });
 
 app.get('/healthy', (req, res) => {
-    logger.info('health check');
-    res.status(200).json({ status: 'healthy ✅' });
+  logger.info({ msg: 'health check' });
+  res.json({ status: 'healthy' });
 });
 
-app.get('/logs', (req, res) => {
-    logger.info({ event: 'log-test' }, 'info log generated');
-    logger.warn({ event: 'log-test' }, 'warn log generated');
-    logger.error({ event: 'log-test' }, 'error log generated');
-
-    res.json({ message: 'logs generated' });
-});
-
+// -------------------- NORMAL ERROR --------------------
 app.get('/serverError', (req, res) => {
-    logger.error('intentional server error');
-    res.status(500).json({ error: 'internal error' });
+  logger.error({ msg: 'manual server error triggered' });
+  res.status(500).json({ error: 'Internal Server Error' });
 });
 
-app.get('/notFound', (req, res) => {
-    logger.warn('not found route hit');
-    res.status(404).json({ error: 'not found' });
+// -------------------- WARNING SIMULATION --------------------
+app.get('/load', (req, res) => {
+  const load = Math.random();
+
+  if (load > 0.7) {
+    logger.warn({ msg: 'high load detected', load });
+  } else {
+    logger.info({ msg: 'normal load', load });
+  }
+
+  res.json({ load });
 });
 
-app.get('/example', async (req, res) => {
-    const endGauge = gauge.startTimer({
-        method: req.method,
-        status: res.statusCode,
-    });
+// -------------------- CRASH (IMPORTANT FIX) --------------------
+app.get('/crash', (req, res) => {
+  logger.fatal({ msg: 'crashing intentionally', reason: 'test endpoint' });
 
-    await simulateAsyncTask();
+  res.status(500).send('crashing...');
 
-    endGauge();
-    res.send('async task completed');
-});
-
-app.get('/call-service-b', async (req, res) => {
-    try {
-        const response = await axios.get(`${process.env.SERVICE_B_URI}/hello`);
-        logger.info('service-b called successfully');
-
-        res.send(`<h1>Service B says: ${response.data}</h1>`);
-    } catch (err) {
-        logger.error({ err }, 'error calling service-b');
-        res.status(500).send('error calling service-b');
-    }
-});
-
-app.get('/crash', () => {
-    logger.error('crashing intentionally');
+  setTimeout(() => {
     process.exit(1);
+  }, 200);
 });
 
-// ----------------------
-// Metrics Endpoint
-// ----------------------
+// -------------------- SERVICE CALL --------------------
+app.get('/call-service-b', async (req, res) => {
+  try {
+    const response = await axios.get(`${process.env.SERVICE_B_URI}/hello`);
+
+    logger.info({ msg: 'service-b called successfully' });
+
+    res.send(`<h1>Service B: ${response.data}</h1>`);
+  } catch (err) {
+    logger.error({ msg: 'service-b call failed', error: err.message });
+    res.status(500).send('error calling service-b');
+  }
+});
+
+// -------------------- METRICS --------------------
 app.get('/metrics', async (req, res) => {
-    res.set('Content-Type', promClient.register.contentType);
-    res.end(await promClient.register.metrics());
+  res.set('Content-Type', promClient.register.contentType);
+  res.end(await promClient.register.metrics());
 });
 
-// ----------------------
-// Start Server
-// ----------------------
+// -------------------- START --------------------
 app.listen(PORT, () => {
-    logger.info(`service running on port ${PORT}`);
+  logger.info({ msg: `service running on port ${PORT}` });
 });
