@@ -1,4 +1,4 @@
-// src/tracing.js
+'use strict';
 
 const { NodeSDK } = require('@opentelemetry/sdk-node');
 const { getNodeAutoInstrumentations } = require('@opentelemetry/auto-instrumentations-node');
@@ -6,24 +6,19 @@ const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http')
 const { Resource } = require('@opentelemetry/resources');
 const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions');
 
-// OTLP exporter (Jaeger listens on this via collector/all-in-one)
+// IMPORTANT: OTLP endpoint
 const traceExporter = new OTLPTraceExporter({
-  url: `${process.env.OTEL_EXPORTER_OTLP_ENDPOINT}/v1/traces`,
+  url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
 });
 
-// SDK setup
 const sdk = new NodeSDK({
-  traceExporter,
-  instrumentations: [
-    getNodeAutoInstrumentations(),
-  ],
   resource: new Resource({
-    [SemanticResourceAttributes.SERVICE_NAME]:
-      process.env.OTEL_SERVICE_NAME || 'nodejs-app-a',
+    [SemanticResourceAttributes.SERVICE_NAME]: process.env.OTEL_SERVICE_NAME || 'nodejs-app-a',
   }),
+  traceExporter,
+  instrumentations: [getNodeAutoInstrumentations()],
 });
 
-// start tracing
 sdk.start();
 
-console.log('Tracing initialized');
+console.log('OTEL tracing initialized');
