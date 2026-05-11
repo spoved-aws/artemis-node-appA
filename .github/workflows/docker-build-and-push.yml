@@ -2,45 +2,39 @@ name: Build & Push Artemis NodeJS App-A
 
 on:
   push:
-    branches: 
+    branches:
       - main
     paths:
-      - 'src/*'
+      - 'src/**'
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
 
     steps:
-      # 1 Checkout the repo
+      # Checkout repo
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2 Checkout main branch local
-      - name: Ensure local branch
-        run: |
-          git checkout -B main
+      # Get git SHA
+      - name: Get git SHA short
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
-      # 3 Log in to Docker Hub
+      # Login to Docker Hub
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 3 Get short git SHA
-      - name: Get git SHA short
-        id: vars
-        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-
-      # 4 Build and push image
+      # Build and push image
       - name: Build and Publish Image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile
           push: true
-          no-cache: true 
+          no-cache: true
           tags: |
             kanukhosla10/artemis-node-app-a:latest
-            kanukhosla10/artemis-node-app-a:sha-${{ env.sha_short  }}
+            kanukhosla10/artemis-node-app-a:sha-${{ env.sha_short }}

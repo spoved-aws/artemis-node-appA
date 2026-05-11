@@ -1,5 +1,5 @@
 require('dotenv').config();
-require('./tracing');
+require('./tracing'); // MUST stay first for OTel instrumentation
 
 const express = require('express');
 const pino = require('pino');
@@ -13,7 +13,7 @@ const PORT = 3001;
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
   base: {
-    service: 'nodejs-app-a'
+    service: process.env.OTEL_SERVICE_NAME || 'nodejs-app-a'
   }
 });
 
@@ -55,11 +55,14 @@ app.use((req, res, next) => {
       status_code: res.statusCode
     });
 
-    requestDurationHistogram.observe({
-      method: req.method,
-      path: req.path,
-      status_code: res.statusCode
-    }, duration);
+    requestDurationHistogram.observe(
+      {
+        method: req.method,
+        path: req.path,
+        status_code: res.statusCode
+      },
+      duration
+    );
   });
 
   next();
@@ -76,13 +79,13 @@ app.get('/healthy', (req, res) => {
   res.json({ status: 'healthy' });
 });
 
-// -------------------- NORMAL ERROR --------------------
+// -------------------- ERROR --------------------
 app.get('/serverError', (req, res) => {
   logger.error({ msg: 'manual server error triggered' });
   res.status(500).json({ error: 'Internal Server Error' });
 });
 
-// -------------------- WARNING SIMULATION --------------------
+// -------------------- LOAD TEST --------------------
 app.get('/load', (req, res) => {
   const load = Math.random();
 
@@ -95,7 +98,7 @@ app.get('/load', (req, res) => {
   res.json({ load });
 });
 
-// -------------------- CRASH (IMPORTANT FIX) --------------------
+// -------------------- CRASH (IMPORTANT) --------------------
 app.get('/crash', (req, res) => {
   logger.fatal({ msg: 'crashing intentionally', reason: 'test endpoint' });
 

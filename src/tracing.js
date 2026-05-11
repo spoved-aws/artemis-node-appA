@@ -1,43 +1,29 @@
-'use strict';
+// src/tracing.js
 
-const { NodeTracerProvider } = require('@opentelemetry/sdk-trace-node'); // Updated import
-const { JaegerExporter } = require('@opentelemetry/exporter-jaeger');
-const { registerInstrumentations } = require('@opentelemetry/instrumentation');
+const { NodeSDK } = require('@opentelemetry/sdk-node');
+const { getNodeAutoInstrumentations } = require('@opentelemetry/auto-instrumentations-node');
+const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
 const { Resource } = require('@opentelemetry/resources');
 const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions');
-const { SimpleSpanProcessor } = require('@opentelemetry/sdk-trace-base');
-const { HttpInstrumentation } = require('@opentelemetry/instrumentation-http');
-const { ExpressInstrumentation } = require('@opentelemetry/instrumentation-express');
 
-// Initialize the provider
-const provider = new NodeTracerProvider({
+// OTLP exporter (Jaeger listens on this via collector/all-in-one)
+const traceExporter = new OTLPTraceExporter({
+  url: `${process.env.OTEL_EXPORTER_OTLP_ENDPOINT}/v1/traces`,
+});
+
+// SDK setup
+const sdk = new NodeSDK({
+  traceExporter,
+  instrumentations: [
+    getNodeAutoInstrumentations(),
+  ],
   resource: new Resource({
-    [SemanticResourceAttributes.SERVICE_NAME]: 'service-a',
+    [SemanticResourceAttributes.SERVICE_NAME]:
+      process.env.OTEL_SERVICE_NAME || 'nodejs-app-a',
   }),
 });
 
-const JAEGER_ENDPOINT =  process.env.OTEL_EXPORTER_JAEGER_ENDPOINT
-
-// Setup the exporter
-const exporter = new JaegerExporter({
-  endpoint: JAEGER_ENDPOINT, // Replace with the appropriate Jaeger collector endpoint
-});
-
-// Add the exporter to the provider
-provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
-
-// Initialize the provider and instrumentations
-provider.register();
-
-registerInstrumentations({
-  instrumentations: [
-    new HttpInstrumentation({
-      applyCustomAttributesOnSpan: (span, request, response) => {
-        span.setAttribute('custom-attribute', 'custom-value');
-      },
-    }),
-    new ExpressInstrumentation(), // Add this for Express.js instrumentation
-  ],
-});
+// start tracing
+sdk.start();
 
 console.log('Tracing initialized');
